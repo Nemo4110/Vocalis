@@ -1,0 +1,70 @@
+# Oral Practice Prototype Configuration
+
+scoring:
+  # Weights for overall score (must sum to 1.0)
+  weights:
+    accuracy: 0.30      # Content accuracy (WER-based)
+    fluency: 0.25       # Fluency (speed, pauses)
+    rhythm: 0.25        # Rhythm consistency (vs reference audio timeline)
+    clarity: 0.15       # Pronunciation clarity (Whisper confidence)
+    completeness: 0.05  # Completeness (did user read all words?)
+
+  # Scoring thresholds
+  thresholds:
+    # WER thresholds (lower is better)
+    wer_excellent: 0.05   # <5% WER = excellent
+    wer_good: 0.15        # <15% WER = good
+    wer_fair: 0.30        # <30% WER = fair
+    wer_poor: 0.50        # >50% WER = poor
+
+    # WPM (words per minute) targets
+    wpm_ideal: 150
+    wpm_tolerance: 30     # 120-180 WPM is acceptable
+
+    # Word duration difference thresholds (vs reference)
+    duration_diff_excellent: 0.10   # <10% diff
+    duration_diff_good: 0.25        # <25% diff
+    duration_diff_fair: 0.50        # <50% diff
+
+    # Pause thresholds (in seconds)
+    pause_expected_between_sentences: 0.8
+    pause_expected_between_clauses: 0.4
+    pause_max_acceptable_in_sentence: 1.5
+
+    # Whisper confidence thresholds
+    clarity_excellent: -0.3   # avg_logprob > -0.3
+    clarity_good: -0.5
+    clarity_fair: -0.8
+
+tts:
+  # Available providers: edge_tts, openai, system
+  provider: edge_tts
+
+  edge_tts:
+    voice: en-US-AvaNeural
+    rate: "-10%"          # Slightly slower for practice
+    volume: "+0%"
+    pitch: "+0Hz"
+
+  openai:
+    model: tts-1
+    voice: alloy          # alloy, echo, fable, onyx, nova, shimmer
+    speed: 1.0
+
+  system:
+    engine: sapi5         # sapi5 (Windows), nsss (macOS), espeak (Linux)
+    rate: 150             # Words per minute
+
+whisper:
+  model: whisper-1
+  language: en
+  response_format: verbose_json
+  timestamp_granularities:
+    - word
+    - segment
+
+paths:
+  data_dir: ./data
+  reports_dir: ./reports
+  assets_dir: ./assets
+  history_file: ./data/history.json
