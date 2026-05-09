@@ -1,0 +1,26 @@
+[project]
+name = "vocalis"
+version = "0.1.0"
+description = "AI-powered oral English practice tool with multi-dimensional scoring"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0.0",
+    "pyyaml>=6.0",
+    "edge-tts>=6.0.0",
+    "pyttsx3>=2.90",
+    "librosa>=0.10.0",
+    "fastdtw>=0.3.4",
+    "matplotlib>=3.7.0",
+    "numpy>=1.24.0",
+    "jiwer>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts"]
