@@ -16,14 +16,36 @@ class ReportGenerator:
         text_title: str = "Practice Text",
         previous_best: Optional[float] = None,
     ) -> str:
-        """Generate a full practice report as markdown text."""
+        """Generate a full practice report as markdown text.
+
+        The report uses HTML comment anchors to enable machine parsing
+        while remaining fully human-readable.
+        """
         lines = []
 
+        # Machine-parseable metadata header
+        lines.append("<!-- vocalis:meta:start -->")
+        lines.append(f"<!-- vocalis:overall_score={result.overall:.1f} -->")
+        lines.append(f"<!-- vocalis:accuracy={result.accuracy:.1f} -->")
+        lines.append(f"<!-- vocalis:fluency={result.fluency:.1f} -->")
+        lines.append(f"<!-- vocalis:rhythm={result.rhythm:.1f} -->")
+        lines.append(f"<!-- vocalis:clarity={result.clarity:.1f} -->")
+        lines.append(f"<!-- vocalis:completeness={result.completeness:.1f} -->")
+        lines.append(f"<!-- vocalis:wer={result.wer:.3f} -->")
+        lines.append(f"<!-- vocalis:wpm={result.wpm:.1f} -->")
+        lines.append(f"<!-- vocalis:word_count={result.word_count} -->")
+        lines.append(f"<!-- vocalis:missing_words={result.missing_words} -->")
+        lines.append(f"<!-- vocalis:extra_words={result.extra_words} -->")
+        lines.append(f"<!-- vocalis:pause_count={result.pause_count} -->")
+        lines.append("<!-- vocalis:meta:end -->")
+        lines.append("")
+
         # Header
-        lines.append(f"# 🎤 Speaking Practice Report: {text_title}")
+        lines.append(f"#  Speaking Practice Report: {text_title}")
         lines.append("")
 
         # Overall score
+        lines.append("<!-- vocalis:section=overall -->")
         score_emoji = ReportGenerator._score_emoji(result.overall)
         lines.append(f"## Overall Score: {result.overall:.1f}/100 {score_emoji}")
         if previous_best is not None:
@@ -37,6 +59,7 @@ class ReportGenerator:
         lines.append("")
 
         # Dimension scores
+        lines.append("<!-- vocalis:section=dimensions -->")
         lines.append("## Dimension Breakdown")
         lines.append("")
         lines.append("| Dimension | Score | Rating |")
@@ -55,6 +78,7 @@ class ReportGenerator:
         lines.append("")
 
         # Key metrics
+        lines.append("<!-- vocalis:section=metrics -->")
         lines.append("## Key Metrics")
         lines.append("")
         lines.append(f"- **Word Error Rate (WER):** {result.wer*100:.1f}% ({result.missing_words} missing, {result.extra_words} extra)")
@@ -65,6 +89,7 @@ class ReportGenerator:
         lines.append("")
 
         # Word-level analysis
+        lines.append("<!-- vocalis:section=words -->")
         lines.append("## Word-Level Analysis")
         lines.append("")
         lines.append(ReportGenerator._word_table(result.word_alignments))
@@ -72,6 +97,7 @@ class ReportGenerator:
 
         # Pause analysis
         if result.pauses:
+            lines.append("<!-- vocalis:section=pauses -->")
             lines.append("## Pause Analysis")
             lines.append("")
             lines.append("| # | After Word | Duration | Assessment |")
@@ -92,6 +118,7 @@ class ReportGenerator:
             lines.append("")
 
         # Recommendations
+        lines.append("<!-- vocalis:section=recommendations -->")
         lines.append("## Recommendations")
         lines.append("")
         lines.extend(ReportGenerator._recommendations(result))
@@ -102,15 +129,15 @@ class ReportGenerator:
     @staticmethod
     def _score_emoji(score: float) -> str:
         if score >= 90:
-            return "🏆"
+            return "[A+]"
         elif score >= 80:
-            return "🌟"
+            return "[A]"
         elif score >= 70:
-            return "👍"
+            return "[B]"
         elif score >= 60:
-            return "💪"
+            return "[C]"
         else:
-            return "📚"
+            return "[D]"
 
     @staticmethod
     def _rating_text(score: float) -> str:
@@ -128,7 +155,7 @@ class ReportGenerator:
     @staticmethod
     def _score_bar(score: float, width: int = 15) -> str:
         filled = int(score / 100 * width)
-        return "█" * filled + "░" * (width - filled)
+        return "#" * filled + "-" * (width - filled)
 
     @staticmethod
     def _word_table(alignments: List[WordAlignment], max_rows: int = 50) -> str:
@@ -139,23 +166,23 @@ class ReportGenerator:
 
         for i, a in enumerate(alignments[:max_rows], 1):
             ref = a.ref_word or "(extra)"
-            user = a.user_word or "—"
+            user = a.user_word or "-"
 
             if a.status == "ok":
-                status = "✓"
-                diff = f"{a.duration_diff_pct*100:+.0f}%" if a.duration_diff_pct is not None else "—"
+                status = "OK"
+                diff = f"{a.duration_diff_pct*100:+.0f}%" if a.duration_diff_pct is not None else "-"
             elif a.status == "missing":
-                status = "✗ missing"
-                diff = "—"
+                status = "MISS"
+                diff = "-"
             elif a.status == "extra":
-                status = "⚠ extra"
-                diff = "—"
+                status = "EXTRA"
+                diff = "-"
             elif a.status == "wrong":
-                status = "✗ wrong"
-                diff = f"{a.duration_diff_pct*100:+.0f}%" if a.duration_diff_pct is not None else "—"
+                status = "WRONG"
+                diff = f"{a.duration_diff_pct*100:+.0f}%" if a.duration_diff_pct is not None else "-"
             else:
                 status = "?"
-                diff = "—"
+                diff = "-"
 
             # Truncate long words
             ref = ref[:20]
@@ -176,41 +203,41 @@ class ReportGenerator:
         # Accuracy recommendations
         if result.accuracy < 70:
             if result.wer > 0.3:
-                recs.append("🎯 **Accuracy:** Many words were missed or misread. Try reading more slowly and focus on each word.")
+                recs.append("[Accuracy] Many words were missed or misread. Try reading more slowly and focus on each word.")
             else:
-                recs.append("🎯 **Accuracy:** Some words were incorrect. Review the word-level table above to identify trouble spots.")
+                recs.append("[Accuracy] Some words were incorrect. Review the word-level table above to identify trouble spots.")
         elif result.accuracy < 85:
-            recs.append("🎯 **Accuracy:** Good! A few errors remain. Check the marked words above and practice those specifically.")
+            recs.append("[Accuracy] Good! A few errors remain. Check the marked words above and practice those specifically.")
 
         # Fluency recommendations
         if result.fluency < 70:
             if result.wpm < 100:
-                recs.append("🗣️ **Fluency:** Your pace is quite slow. Try to read more continuously without long hesitations.")
+                recs.append("[Fluency] Your pace is quite slow. Try to read more continuously without long hesitations.")
             elif result.wpm > 200:
-                recs.append("🗣️ **Fluency:** You're speaking very fast! Slow down a bit for better clarity and rhythm.")
+                recs.append("[Fluency] You're speaking very fast! Slow down a bit for better clarity and rhythm.")
             elif result.pause_count > 5:
-                recs.append(f"🗣️ **Fluency:** You had {result.pause_count} pauses. Try to read more smoothly with fewer mid-sentence breaks.")
+                recs.append(f"[Fluency] You had {result.pause_count} pauses. Try to read more smoothly with fewer mid-sentence breaks.")
         elif result.fluency < 85:
-            recs.append("🗣️ **Fluency:** Decent pace. Work on reducing unnecessary pauses within sentences.")
+            recs.append("[Fluency] Decent pace. Work on reducing unnecessary pauses within sentences.")
 
         # Rhythm recommendations
         if result.rhythm < 70:
-            recs.append("🎵 **Rhythm:** Your word timing differs significantly from the reference. Listen to the standard audio and try to match its rhythm more closely.")
+            recs.append("[Rhythm] Your word timing differs significantly from the reference. Listen to the standard audio and try to match its rhythm more closely.")
         elif result.rhythm < 85:
-            recs.append("🎵 **Rhythm:** Getting there! Some words were held too long or too short. Focus on the words marked with large duration differences.")
+            recs.append("[Rhythm] Getting there! Some words were held too long or too short. Focus on the words marked with large duration differences.")
 
         # Clarity recommendations
         if result.clarity < 70:
-            recs.append("🔊 **Clarity:** Pronunciation was unclear in places. Speak closer to the microphone and enunciate each word clearly.")
+            recs.append("[Clarity] Pronunciation was unclear in places. Speak closer to the microphone and enunciate each word clearly.")
         elif result.clarity < 85:
-            recs.append("🔊 **Clarity:** Generally clear. Pay attention to words with low confidence scores in the table above.")
+            recs.append("[Clarity] Generally clear. Pay attention to words with low confidence scores in the table above.")
 
         # Completeness
         if result.completeness < 90:
-            recs.append(f"📖 **Completeness:** You skipped {result.missing_words} word(s). Try to read the entire text without skipping.")
+            recs.append(f"[Completeness] You skipped {result.missing_words} word(s). Try to read the entire text without skipping.")
 
         if not recs:
-            recs.append("🎉 **Fantastic work!** All dimensions scored well. Keep practicing to maintain this level!")
+            recs.append("[Great work!] All dimensions scored well. Keep practicing to maintain this level!")
 
         return [f"{i+1}. {r}" for i, r in enumerate(recs)]
 
@@ -221,7 +248,7 @@ class ReportGenerator:
     ) -> str:
         """Generate a summary report of all practice history."""
         lines = []
-        lines.append("# 📊 Practice Summary")
+        lines.append("#  Practice Summary")
         lines.append("")
         lines.append(f"**Total Sessions:** {history_stats.get('total_sessions', 0)}")
         lines.append(f"**Average Score:** {history_stats.get('average_score', 0):.1f}")
