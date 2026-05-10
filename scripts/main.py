@@ -23,6 +23,8 @@ from scorer import ScoringEngine
 from reporter import ReportGenerator
 from history import HistoryManager, SessionRecord
 from plot_progress import ProgressPlotter
+from text_library import TextLibrary
+from cache_manager import CacheManager
 
 
 class OralPracticeSession:
@@ -33,6 +35,10 @@ class OralPracticeSession:
         self.scorer = ScoringEngine(self.config)
         self.history = HistoryManager(
             self.config.get("paths", {}).get("history_file", "./data/history.json")
+        )
+        self.library = TextLibrary()
+        self.cache = CacheManager(
+            str(self.data_dir / "cache")
         )
 
         # Initialize Whisper transcriber
@@ -86,10 +92,16 @@ class OralPracticeSession:
             ref_audio_path = await self._generate_reference_audio(text, text_id)
             if ref_audio_path:
                 print(f"  Reference audio: {ref_audio_path}")
-                # Transcribe reference to get word timestamps
+                # Transcribe reference to get word timestamps (with caching)
                 try:
-                    reference_transcription = self.transcriber.transcribe(str(ref_audio_path))
-                    print(f"  Reference words: {reference_transcription.word_count}")
+                    cached_ref = self.cache.get_transcription(str(ref_audio_path))
+                    if cached_ref:
+                        reference_transcription = cached_ref
+                        print(f"  Reference words: {reference_transcription.word_count} (cached)")
+                    else:
+                        reference_transcription = self.transcriber.transcribe(str(ref_audio_path))
+                        self.cache.save_transcription(str(ref_audio_path), reference_transcription)
+                        print(f"  Reference words: {reference_transcription.word_count}")
                 except Exception as e:
                     print(f"  Warning: Could not transcribe reference: {e}")
             else:
@@ -97,9 +109,15 @@ class OralPracticeSession:
         else:
             print("Step 1/5: Reference audio generation skipped")
 
-        # Step 2: Transcribe user audio
+        # Step 2: Transcribe user audio (with caching)
         print("\nStep 2/5: Transcribing your audio...")
-        user_transcription = self.transcriber.transcribe(user_audio_path)
+        cached_transcription = self.cache.get_transcription(user_audio_path)
+        if cached_transcription:
+            user_transcription = cached_transcription
+            print(f"  (cached)")
+        else:
+            user_transcription = self.transcriber.transcribe(user_audio_path)
+            self.cache.save_transcription(user_audio_path, user_transcription)
         print(f"  Detected words: {user_transcription.word_count}")
         print(f"  Duration: {user_transcription.duration:.1f}s")
         print(f"  Speed: {user_transcription.wpm:.0f} WPM")
@@ -237,13 +255,23 @@ class OralPracticeSession:
         }
 
     async def _generate_reference_audio(self, text: str, text_id: str) -> Path:
-        """Generate reference TTS audio for the text."""
-        try:
-            tts_config = self.config.get("tts", {})
-            provider = TTSProviderFactory.create(tts_config)
+        """Generate reference TTS audio for the text (with caching)."""
+        tts_config = self.config.get("tts", {})
+        voice_cfg = tts_config.get(tts_config.get("provider", "edge_tts"), {})
 
+        # Check cache first
+        cached = self.cache.get_tts_path(text, voice_cfg)
+        if cached:
+            print(f"  Reference audio (cached): {cached}")
+            return cached
+
+        try:
+            provider = TTSProviderFactory.create(tts_config)
             output_path = self.data_dir / f"ref_{text_id}.mp3"
             await provider.synthesize(text, str(output_path))
+
+            # Save to cache
+            self.cache.save_tts_path(text, voice_cfg, str(output_path))
             return output_path
         except Exception as e:
             print(f"  Warning: TTS generation failed: {e}")
@@ -266,7 +294,7 @@ class OralPracticeSession:
 
 def run_demo():
     """Run a demo session with mock data (no API calls)."""
-    print("\n🎬 DEMO MODE - Using mock data (no API calls)\n")
+    print("\n[DEMO MODE] Using mock data (no API calls)\n")
 
     from transcriber import TranscriptionResult, SegmentInfo, WordTimestamp
     from scorer import ScoringResult
@@ -355,15 +383,25 @@ def run_demo():
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Oral Practice Prototype")
+    parser = argparse.ArgumentParser(description="Vocalis Oral Practice Skill")
     parser.add_argument("--text", type=str, help="Reference text to practice")
     parser.add_argument("--audio", type=str, help="Path to user audio file")
-    parser.add_argument("--text-id", type=str, default="custom", help="Text identifier")
+    parser.add_argument("--text-id", type=str, default="custom", help="Text identifier (use with --text or select from library)")
     parser.add_argument("--title", type=str, default="Practice Text", help="Text title")
     parser.add_argument("--demo", action="store_true", help="Run with mock data (no API)")
     parser.add_argument("--summary", action="store_true", help="Show practice summary")
     parser.add_argument("--config", type=str, default="./config.yaml", help="Config file path")
     parser.add_argument("--no-ref", action="store_true", help="Skip reference audio generation")
+
+    # Text library commands
+    parser.add_argument("--list-texts", action="store_true", help="List built-in practice texts")
+    parser.add_argument("--show-text", type=str, help="Show a specific text by ID")
+    parser.add_argument("--category", type=str, help="Filter by category (speeches, prose, poetry, excerpts)")
+    parser.add_argument("--difficulty", type=str, help="Filter by difficulty (beginner, intermediate, advanced)")
+
+    # Cache commands
+    parser.add_argument("--clear-cache", action="store_true", help="Clear all cached TTS and transcription data")
+    parser.add_argument("--cache-stats", action="store_true", help="Show cache statistics")
 
     args = parser.parse_args()
 
@@ -371,13 +409,80 @@ async def main():
         run_demo()
         return
 
+    # Text library commands
+    library = TextLibrary()
+
+    if args.list_texts:
+        if args.category or args.difficulty:
+            entries = library.filter(category=args.category, difficulty=args.difficulty)
+            print(f"\n# Filtered Texts ({len(entries)} found)\n")
+            print("| ID | Title | Author | Difficulty | Words |")
+            print("|----|-------|--------|------------|-------|")
+            for e in entries:
+                diff_emoji = {"beginner": "🟢", "intermediate": "🟡", "advanced": "🔴"}.get(e.difficulty, "⚪")
+                print(f"| `{e.text_id}` | {e.title} | {e.author} | {diff_emoji} {e.difficulty} | {e.word_count} |")
+            print()
+        else:
+            print(library.format_catalog())
+        return
+
+    if args.show_text:
+        output = library.format_entry(args.show_text)
+        if output:
+            print(output)
+        else:
+            print(f"Text not found: {args.show_text}")
+            print(f"Use --list-texts to see available texts.")
+        return
+
     if args.summary:
         session = OralPracticeSession(args.config)
         session.show_summary()
         return
 
-    if not args.text or not args.audio:
-        print("Error: --text and --audio are required (or use --demo)")
+    # Cache commands
+    if args.clear_cache:
+        cache = CacheManager("./data/cache")
+        stats_before = cache.stats()
+        cache.clear()
+        print("Cache cleared.")
+        print(f"  Removed: {stats_before['tts_count']} TTS files ({stats_before['tts_size_mb']} MB)")
+        print(f"  Removed: {stats_before['transcription_count']} transcriptions ({stats_before['transcription_size_mb']} MB)")
+        return
+
+    if args.cache_stats:
+        cache = CacheManager("./data/cache")
+        stats = cache.stats()
+        print("\n# Cache Statistics\n")
+        print(f"TTS audio files: {stats['tts_count']} ({stats['tts_size_mb']} MB)")
+        print(f"Transcriptions:  {stats['transcription_count']} ({stats['transcription_size_mb']} MB)")
+        print(f"Total:           {stats['total_size_mb']} MB")
+        print()
+        return
+
+    # Resolve text: either from --text, or from --text-id in library
+    text = args.text
+    text_title = args.title
+    text_category = "custom"
+    difficulty = "intermediate"
+
+    if not text and args.text_id != "custom":
+        entry = library.get_by_id(args.text_id)
+        if entry:
+            text = entry.content_clean
+            text_title = entry.title
+            text_category = entry.category
+            difficulty = entry.difficulty
+            print(f"Loaded text from library: {entry.display_name}")
+            print(f"Difficulty: {entry.difficulty} | Words: {entry.word_count}")
+            print()
+        else:
+            print(f"Error: Text ID '{args.text_id}' not found in library.")
+            print("Use --list-texts to see available texts.")
+            return
+
+    if not text or not args.audio:
+        print("Error: --text and --audio are required (or use --text-id, --demo, --list-texts)")
         parser.print_help()
         return
 
@@ -388,10 +493,12 @@ async def main():
     # Run session
     session = OralPracticeSession(args.config)
     await session.run_session(
-        text=args.text,
+        text=text,
         user_audio_path=args.audio,
         text_id=args.text_id,
-        text_title=args.title,
+        text_title=text_title,
+        text_category=text_category,
+        difficulty=difficulty,
         generate_reference=not args.no_ref,
     )
 
